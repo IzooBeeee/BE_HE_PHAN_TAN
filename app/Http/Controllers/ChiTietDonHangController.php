@@ -16,6 +16,7 @@ use App\Models\MonAn;
 use App\Models\QuanAn;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use GuzzleHttp\Client;
 use Illuminate\Support\Facades\Mail;
 
@@ -212,293 +213,391 @@ class ChiTietDonHangController extends Controller
 
     public function xacNhanDatHangChuyenKhoan($id_quan_an, $id_dia_chi_khach)
     {
-
-        $khachHang  = Auth::guard('sanctum')->user();
-        $gio_hang     =   ChiTietDonHang::where('id_don_hang', 0)
-            ->where('id_khach_hang', Auth::guard('sanctum')->user()->id)
-            ->where('chi_tiet_don_hangs.id_quan_an', $id_quan_an)
-            ->join('mon_ans', 'mon_ans.id', '=', 'chi_tiet_don_hangs.id_mon_an')
-            ->select('chi_tiet_don_hangs.*', 'mon_ans.ten_mon_an')
-            ->get();
-
-        $link_get = 'https://api.openrouteservice.org/geocode/search';
-        $dia_chi_quan  = QuanAn::where('id', $id_quan_an)->first();
-        $dia_chi_khach = DiaChi::where('id', $id_dia_chi_khach)->first();
-
-        $client        = new Client();
-
-        // Lấy tọa độ quán
-        $response_quan      = $client->request('GET', $link_get, [
-            'headers' => [
-                'User-Agent' => 'MyApp/1.0',
-                'Accept'     => 'application/json',
-            ],
-            'query' => [
-                'api_key' => '5b3ce3597851110001cf62484c960a399b1d44f4829554f302e513b8',
-                'text'    => $dia_chi_quan->dia_chi,
-                'size'    => 1
-            ]
-        ]);
-        // return ($dia_chi_quan->dia_chi);
-        $body = $response_quan->getBody()->getContents();
-        $response_quan = json_decode($body, true);
-        $toa_do_quan   = $response_quan['features'][0]['geometry']['coordinates'];
-
-        // Lấy tọa độ khách
-        $response_khach      = $client->request('GET', $link_get, [
-            'headers' => [
-                'User-Agent' => 'MyApp/1.0',
-                'Accept'     => 'application/json',
-            ],
-            'query' => [
-                'api_key' => '5b3ce3597851110001cf62484c960a399b1d44f4829554f302e513b8',
-                'text'    => $dia_chi_khach->dia_chi,
-                'size'    => 1
-            ]
-        ]);
-        $body = $response_khach->getBody()->getContents();
-        $response_khach = json_decode($body, true);
-        $toa_do_khach   = $response_khach['features'][0]['geometry']['coordinates'];
-
-        $link_directions = 'https://api.openrouteservice.org/v2/directions/driving-car';
-        // Tính khoảng cách
-        $response_distance = $client->request('POST', $link_directions, [
-            'headers' => [
-                'Authorization' => '5b3ce3597851110001cf62484c960a399b1d44f4829554f302e513b8', // API Key
-                'Content-Type'  => 'application/json',
-                'Accept'        => 'application/json',
-            ],
-            'json' => [
-                'coordinates' => [
-                    $toa_do_quan,  // Tọa độ quán
-                    $toa_do_khach  // Tọa độ khách
-                ],
-                'units' => 'km' // Đơn vị khoảng cách: kilômét
-            ]
-        ]);
-
-        $body               = $response_distance->getBody()->getContents();
-        $response_distance  = json_decode($body, true);
         try {
-            if (!empty($response_distance['routes'][0]['summary']['distance'])) {
-                $khoang_cach_km = $response_distance['routes'][0]['summary']['distance'];
+            $khachHang  = Auth::guard('sanctum')->user();
 
-                if ($khoang_cach_km <= 30) {
-                    $phi_ship = round($khoang_cach_km * 15, -3); // làm tròn nghìn
-                } else {
-                    $phi_ship = 50000;
+            // Validate: Kiểm tra giỏ hàng
+            $gio_hang     =   ChiTietDonHang::where('id_don_hang', 0)
+                ->where('id_khach_hang', $khachHang->id)
+                ->where('chi_tiet_don_hangs.id_quan_an', $id_quan_an)
+                ->join('mon_ans', 'mon_ans.id', '=', 'chi_tiet_don_hangs.id_mon_an')
+                ->select('chi_tiet_don_hangs.*', 'mon_ans.ten_mon_an')
+                ->get();
+
+            if ($gio_hang->isEmpty()) {
+                return response()->json([
+                    'status'    => false,
+                    'message'   => 'Giỏ hàng trống. Vui lòng thêm món ăn trước khi đặt hàng.'
+                ], 400);
+            }
+
+            // Validate: Kiểm tra địa chỉ quán ăn
+            $dia_chi_quan  = QuanAn::where('id', $id_quan_an)->first();
+            if (!$dia_chi_quan) {
+                return response()->json([
+                    'status'    => false,
+                    'message'   => 'Không tìm thấy thông tin quán ăn.'
+                ], 404);
+            }
+
+            // Validate: Kiểm tra địa chỉ khách hàng
+            $dia_chi_khach = DiaChi::where('id', $id_dia_chi_khach)
+                ->where('id_khach_hang', $khachHang->id)
+                ->first();
+            if (!$dia_chi_khach) {
+                return response()->json([
+                    'status'    => false,
+                    'message'   => 'Không tìm thấy địa chỉ giao hàng.'
+                ], 404);
+            }
+
+            $link_get = 'https://api.openrouteservice.org/geocode/search';
+            $client   = new Client();
+            $phi_ship = 50000; // Default phi ship
+
+            // Lấy tọa độ quán
+            try {
+                $response_quan = $client->request('GET', $link_get, [
+                    'headers' => [
+                        'User-Agent' => 'MyApp/1.0',
+                        'Accept'     => 'application/json',
+                    ],
+                    'query' => [
+                        'api_key' => '5b3ce3597851110001cf62484c960a399b1d44f4829554f302e513b8',
+                        'text'    => $dia_chi_quan->dia_chi,
+                        'size'    => 1
+                    ]
+                ]);
+
+                $body = $response_quan->getBody()->getContents();
+                $response_quan_data = json_decode($body, true);
+
+                if (empty($response_quan_data['features'][0]['geometry']['coordinates'])) {
+                    throw new \Exception('Không tìm thấy tọa độ quán ăn');
                 }
-            } else {
+                $toa_do_quan = $response_quan_data['features'][0]['geometry']['coordinates'];
+
+                // Lấy tọa độ khách
+                $response_khach = $client->request('GET', $link_get, [
+                    'headers' => [
+                        'User-Agent' => 'MyApp/1.0',
+                        'Accept'     => 'application/json',
+                    ],
+                    'query' => [
+                        'api_key' => '5b3ce3597851110001cf62484c960a399b1d44f4829554f302e513b8',
+                        'text'    => $dia_chi_khach->dia_chi,
+                        'size'    => 1
+                    ]
+                ]);
+
+                $body = $response_khach->getBody()->getContents();
+                $response_khach_data = json_decode($body, true);
+
+                if (empty($response_khach_data['features'][0]['geometry']['coordinates'])) {
+                    throw new \Exception('Không tìm thấy tọa độ địa chỉ giao hàng');
+                }
+                $toa_do_khach = $response_khach_data['features'][0]['geometry']['coordinates'];
+
+                // Tính khoảng cách
+                $link_directions = 'https://api.openrouteservice.org/v2/directions/driving-car';
+                $response_distance = $client->request('POST', $link_directions, [
+                    'headers' => [
+                        'Authorization' => '5b3ce3597851110001cf62484c960a399b1d44f4829554f302e513b8',
+                        'Content-Type'  => 'application/json',
+                        'Accept'        => 'application/json',
+                    ],
+                    'json' => [
+                        'coordinates' => [
+                            $toa_do_quan,
+                            $toa_do_khach
+                        ],
+                        'units' => 'km'
+                    ]
+                ]);
+
+                $body = $response_distance->getBody()->getContents();
+                $response_distance_data = json_decode($body, true);
+
+                if (!empty($response_distance_data['routes'][0]['summary']['distance'])) {
+                    $khoang_cach_km = $response_distance_data['routes'][0]['summary']['distance'];
+                    if ($khoang_cach_km <= 30) {
+                        $phi_ship = round($khoang_cach_km * 15, -3); // làm tròn nghìn
+                    } else {
+                        $phi_ship = 50000;
+                    }
+                }
+            } catch (\Exception $e) {
+                // Nếu API geocoding fail, sử dụng phí ship mặc định
+                Log::warning('Geocoding API failed: ' . $e->getMessage());
                 $phi_ship = 50000;
             }
-        } catch (\Exception $e) {
-            $phi_ship = 50000;
-        }
-        // Tạo mã đơn hàng unique bằng timestamp + random
-        $ma_don_hang_temp = 'DZ' . time() . rand(100, 999);
 
-        $donHang = DonHang::create([
-            'ma_don_hang'       =>  $ma_don_hang_temp,
-            'id_khach_hang'     =>  Auth::guard('sanctum')->user()->id,
-            'id_voucher'        =>  0,
-            'id_shipper'        =>  0,
-            'id_quan_an'        =>  $id_quan_an,
-            'phuong_thuc_thanh_toan' =>  DonHang::thanh_toan_chuyen_khoan,
-            'id_dia_chi_nhan'   =>  $id_dia_chi_khach,
-            'ten_nguoi_nhan'    =>  $dia_chi_khach->ten_nguoi_nhan,
-            'so_dien_thoai'     =>  $dia_chi_khach->so_dien_thoai,
-            'tien_hang'         =>  $gio_hang->sum('thanh_tien'),
-            'phi_ship'          =>  $phi_ship,
-            'tong_tien'         =>  $gio_hang->sum('thanh_tien') + $phi_ship,
-            'is_thanh_toan'     =>  0,
-            'tinh_trang'        =>  0,
-        ]);
+            // Tạo mã đơn hàng unique bằng timestamp + random
+            $ma_don_hang_temp = 'DZ' . time() . rand(100, 999);
 
-        // Cập nhật giỏ hàng (id_don_hang = 0) thành đơn hàng thật
-        ChiTietDonHang::where('id_don_hang', 0)
-            ->where('id_khach_hang', Auth::guard('sanctum')->user()->id)
-            ->where('chi_tiet_don_hangs.id_quan_an', $id_quan_an)
-            ->update([
-                'id_don_hang' => $donHang->id,
+            $donHang = DonHang::create([
+                'ma_don_hang'       =>  $ma_don_hang_temp,
+                'id_khach_hang'     =>  $khachHang->id,
+                'id_voucher'        =>  0,
+                'id_shipper'        =>  0,
+                'id_quan_an'        =>  $id_quan_an,
+                'phuong_thuc_thanh_toan' =>  DonHang::thanh_toan_chuyen_khoan,
+                'id_dia_chi_nhan'   =>  $id_dia_chi_khach,
+                'ten_nguoi_nhan'    =>  $dia_chi_khach->ten_nguoi_nhan,
+                'so_dien_thoai'     =>  $dia_chi_khach->so_dien_thoai,
+                'tien_hang'         =>  $gio_hang->sum('thanh_tien'),
+                'phi_ship'          =>  $phi_ship,
+                'tong_tien'         =>  $gio_hang->sum('thanh_tien') + $phi_ship,
+                'is_thanh_toan'     =>  0,
+                'tinh_trang'        =>  0,
             ]);
 
-        // Update lại mã đơn hàng theo ID thật
-        $donHang->ma_don_hang = 'DZ' . $donHang->id;
-        $donHang->save();
+            // Cập nhật giỏ hàng (id_don_hang = 0) thành đơn hàng thật
+            ChiTietDonHang::where('id_don_hang', 0)
+                ->where('id_khach_hang', $khachHang->id)
+                ->where('chi_tiet_don_hangs.id_quan_an', $id_quan_an)
+                ->update([
+                    'id_don_hang' => $donHang->id,
+                ]);
 
-        // Trigger Broadcasting Event: Thông báo đơn hàng mới đến Quán ăn và Shipper
-        event(new DonHangMoiEvent($donHang));
+            // Update lại mã đơn hàng theo ID thật
+            $donHang->ma_don_hang = 'DZ' . $donHang->id;
+            $donHang->save();
 
-        // Lấy lại danh sách món ăn trong đơn hàng để trả về cho modal
-        $chi_tiet_mon_an = ChiTietDonHang::where('id_don_hang', $donHang->id)
-            ->join('mon_ans', 'mon_ans.id', 'chi_tiet_don_hangs.id_mon_an')
-            ->select(
-                'chi_tiet_don_hangs.*',
-                'mon_ans.ten_mon_an',
-                'mon_ans.hinh_anh'
-            )
-            ->get();
+            // Trigger Broadcasting Event: Thông báo đơn hàng mới đến Quán ăn và Shipper
+            event(new DonHangMoiEvent($donHang));
 
-        return response()->json([
-            'status'            =>  true,
-            'message'           =>  'Đã xác nhận đơn hàng thành công!',
-            'id_don_hang'       =>  $donHang->id,
-            'ma_don_hang'       =>  $donHang->ma_don_hang,
-            'tien_hang'         =>  $donHang->tien_hang,
-            'phi_ship'          =>  $donHang->phi_ship,
-            'tong_tien'         =>  $donHang->tong_tien,
-            'chi_tiet_mon_an'   =>  $chi_tiet_mon_an,
-            'dia_chi_nhan'      => [
-                'ten_nguoi_nhan'    => $dia_chi_khach->ten_nguoi_nhan,
-                'so_dien_thoai'     => $dia_chi_khach->so_dien_thoai,
-                'dia_chi'           => $dia_chi_khach->dia_chi,
-            ]
-        ]);
+            // Lấy lại danh sách món ăn trong đơn hàng để trả về cho modal
+            $chi_tiet_mon_an = ChiTietDonHang::where('id_don_hang', $donHang->id)
+                ->join('mon_ans', 'mon_ans.id', 'chi_tiet_don_hangs.id_mon_an')
+                ->select(
+                    'chi_tiet_don_hangs.*',
+                    'mon_ans.ten_mon_an',
+                    'mon_ans.hinh_anh'
+                )
+                ->get();
+
+            return response()->json([
+                'status'            =>  true,
+                'message'           =>  'Đã xác nhận đơn hàng thành công!',
+                'id_don_hang'       =>  $donHang->id,
+                'ma_don_hang'       =>  $donHang->ma_don_hang,
+                'tien_hang'         =>  $donHang->tien_hang,
+                'phi_ship'          =>  $donHang->phi_ship,
+                'tong_tien'         =>  $donHang->tong_tien,
+                'chi_tiet_mon_an'   =>  $chi_tiet_mon_an,
+                'dia_chi_nhan'      => [
+                    'ten_nguoi_nhan'    => $dia_chi_khach->ten_nguoi_nhan,
+                    'so_dien_thoai'     => $dia_chi_khach->so_dien_thoai,
+                    'dia_chi'           => $dia_chi_khach->dia_chi,
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('xacNhanDatHangChuyenKhoan Error: ' . $e->getMessage(), [
+                'id_quan_an' => $id_quan_an,
+                'id_dia_chi_khach' => $id_dia_chi_khach,
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'status'    => false,
+                'message'   => 'Có lỗi xảy ra khi xác nhận đơn hàng: ' . $e->getMessage()
+            ], 500);
+        }
     }
     public function xacNhanDatHangTienMat($id_quan_an, $id_dia_chi_khach)
     {
-
-        $khachHang  = Auth::guard('sanctum')->user();
-        $gio_hang     =   ChiTietDonHang::where('id_don_hang', 0)
-            ->where('id_khach_hang', Auth::guard('sanctum')->user()->id)
-            ->where('chi_tiet_don_hangs.id_quan_an', $id_quan_an)
-            ->join('mon_ans', 'mon_ans.id', '=', 'chi_tiet_don_hangs.id_mon_an')
-            ->select('chi_tiet_don_hangs.*', 'mon_ans.ten_mon_an')
-            ->get();
-
-        $link_get = 'https://api.openrouteservice.org/geocode/search';
-        $dia_chi_quan  = QuanAn::where('id', $id_quan_an)->first();
-        $dia_chi_khach = DiaChi::where('id', $id_dia_chi_khach)->first();
-
-        $client        = new Client();
-
-        // Lấy tọa độ quán
-        $response_quan      = $client->request('GET', $link_get, [
-            'headers' => [
-                'User-Agent' => 'MyApp/1.0',
-                'Accept'     => 'application/json',
-            ],
-            'query' => [
-                'api_key' => '5b3ce3597851110001cf62484c960a399b1d44f4829554f302e513b8',
-                'text'    => $dia_chi_quan->dia_chi,
-                'size'    => 1
-            ]
-        ]);
-        // return ($dia_chi_quan->dia_chi);
-        $body = $response_quan->getBody()->getContents();
-        $response_quan = json_decode($body, true);
-        $toa_do_quan   = $response_quan['features'][0]['geometry']['coordinates'];
-
-        // Lấy tọa độ khách
-        $response_khach      = $client->request('GET', $link_get, [
-            'headers' => [
-                'User-Agent' => 'MyApp/1.0',
-                'Accept'     => 'application/json',
-            ],
-            'query' => [
-                'api_key' => '5b3ce3597851110001cf62484c960a399b1d44f4829554f302e513b8',
-                'text'    => $dia_chi_khach->dia_chi,
-                'size'    => 1
-            ]
-        ]);
-        $body = $response_khach->getBody()->getContents();
-        $response_khach = json_decode($body, true);
-        $toa_do_khach   = $response_khach['features'][0]['geometry']['coordinates'];
-
-        $link_directions = 'https://api.openrouteservice.org/v2/directions/driving-car';
-        // Tính khoảng cách
-        $response_distance = $client->request('POST', $link_directions, [
-            'headers' => [
-                'Authorization' => '5b3ce3597851110001cf62484c960a399b1d44f4829554f302e513b8', // API Key
-                'Content-Type'  => 'application/json',
-                'Accept'        => 'application/json',
-            ],
-            'json' => [
-                'coordinates' => [
-                    $toa_do_quan,  // Tọa độ quán
-                    $toa_do_khach  // Tọa độ khách
-                ],
-                'units' => 'km' // Đơn vị khoảng cách: kilômét
-            ]
-        ]);
-
-        $body               = $response_distance->getBody()->getContents();
-        $response_distance  = json_decode($body, true);
         try {
-            if (!empty($response_distance['routes'][0]['summary']['distance'])) {
-                $khoang_cach_km = $response_distance['routes'][0]['summary']['distance'];
+            $khachHang  = Auth::guard('sanctum')->user();
 
-                if ($khoang_cach_km <= 30) {
-                    $phi_ship = round($khoang_cach_km * 15, -3); // làm tròn nghìn
-                } else {
-                    $phi_ship = 50000;
+            // Validate: Kiểm tra giỏ hàng
+            $gio_hang     =   ChiTietDonHang::where('id_don_hang', 0)
+                ->where('id_khach_hang', $khachHang->id)
+                ->where('chi_tiet_don_hangs.id_quan_an', $id_quan_an)
+                ->join('mon_ans', 'mon_ans.id', '=', 'chi_tiet_don_hangs.id_mon_an')
+                ->select('chi_tiet_don_hangs.*', 'mon_ans.ten_mon_an')
+                ->get();
+
+            if ($gio_hang->isEmpty()) {
+                return response()->json([
+                    'status'    => false,
+                    'message'   => 'Giỏ hàng trống. Vui lòng thêm món ăn trước khi đặt hàng.'
+                ], 400);
+            }
+
+            // Validate: Kiểm tra địa chỉ quán ăn
+            $dia_chi_quan  = QuanAn::where('id', $id_quan_an)->first();
+            if (!$dia_chi_quan) {
+                return response()->json([
+                    'status'    => false,
+                    'message'   => 'Không tìm thấy thông tin quán ăn.'
+                ], 404);
+            }
+
+            // Validate: Kiểm tra địa chỉ khách hàng
+            $dia_chi_khach = DiaChi::where('id', $id_dia_chi_khach)
+                ->where('id_khach_hang', $khachHang->id)
+                ->first();
+            if (!$dia_chi_khach) {
+                return response()->json([
+                    'status'    => false,
+                    'message'   => 'Không tìm thấy địa chỉ giao hàng.'
+                ], 404);
+            }
+
+            $link_get = 'https://api.openrouteservice.org/geocode/search';
+            $client   = new Client();
+            $phi_ship = 50000; // Default phi ship
+
+            // Lấy tọa độ quán
+            try {
+                $response_quan = $client->request('GET', $link_get, [
+                    'headers' => [
+                        'User-Agent' => 'MyApp/1.0',
+                        'Accept'     => 'application/json',
+                    ],
+                    'query' => [
+                        'api_key' => '5b3ce3597851110001cf62484c960a399b1d44f4829554f302e513b8',
+                        'text'    => $dia_chi_quan->dia_chi,
+                        'size'    => 1
+                    ]
+                ]);
+
+                $body = $response_quan->getBody()->getContents();
+                $response_quan_data = json_decode($body, true);
+
+                if (empty($response_quan_data['features'][0]['geometry']['coordinates'])) {
+                    throw new \Exception('Không tìm thấy tọa độ quán ăn');
                 }
-            } else {
+                $toa_do_quan = $response_quan_data['features'][0]['geometry']['coordinates'];
+
+                // Lấy tọa độ khách
+                $response_khach = $client->request('GET', $link_get, [
+                    'headers' => [
+                        'User-Agent' => 'MyApp/1.0',
+                        'Accept'     => 'application/json',
+                    ],
+                    'query' => [
+                        'api_key' => '5b3ce3597851110001cf62484c960a399b1d44f4829554f302e513b8',
+                        'text'    => $dia_chi_khach->dia_chi,
+                        'size'    => 1
+                    ]
+                ]);
+
+                $body = $response_khach->getBody()->getContents();
+                $response_khach_data = json_decode($body, true);
+
+                if (empty($response_khach_data['features'][0]['geometry']['coordinates'])) {
+                    throw new \Exception('Không tìm thấy tọa độ địa chỉ giao hàng');
+                }
+                $toa_do_khach = $response_khach_data['features'][0]['geometry']['coordinates'];
+
+                // Tính khoảng cách
+                $link_directions = 'https://api.openrouteservice.org/v2/directions/driving-car';
+                $response_distance = $client->request('POST', $link_directions, [
+                    'headers' => [
+                        'Authorization' => '5b3ce3597851110001cf62484c960a399b1d44f4829554f302e513b8',
+                        'Content-Type'  => 'application/json',
+                        'Accept'        => 'application/json',
+                    ],
+                    'json' => [
+                        'coordinates' => [
+                            $toa_do_quan,
+                            $toa_do_khach
+                        ],
+                        'units' => 'km'
+                    ]
+                ]);
+
+                $body = $response_distance->getBody()->getContents();
+                $response_distance_data = json_decode($body, true);
+
+                if (!empty($response_distance_data['routes'][0]['summary']['distance'])) {
+                    $khoang_cach_km = $response_distance_data['routes'][0]['summary']['distance'];
+                    if ($khoang_cach_km <= 30) {
+                        $phi_ship = round($khoang_cach_km * 15, -3); // làm tròn nghìn
+                    } else {
+                        $phi_ship = 50000;
+                    }
+                }
+            } catch (\Exception $e) {
+                // Nếu API geocoding fail, sử dụng phí ship mặc định
+                Log::warning('Geocoding API failed: ' . $e->getMessage());
                 $phi_ship = 50000;
             }
-        } catch (\Exception $e) {
-            $phi_ship = 50000;
-        }
-        // Tạo mã đơn hàng unique bằng timestamp + random
-        $ma_don_hang_temp = 'DZ' . time() . rand(100, 999);
 
-        $donHang = DonHang::create([
-            'ma_don_hang'       =>  $ma_don_hang_temp,
-            'id_khach_hang'     =>  Auth::guard('sanctum')->user()->id,
-            'id_voucher'        =>  0,
-            'id_shipper'        =>  0,
-            'id_quan_an'        =>  $id_quan_an,
-            'phuong_thuc_thanh_toan' =>  DonHang::thanh_toan_tien_mat,
-            'id_dia_chi_nhan'   =>  $id_dia_chi_khach,
-            'ten_nguoi_nhan'    =>  $dia_chi_khach->ten_nguoi_nhan,
-            'so_dien_thoai'     =>  $dia_chi_khach->so_dien_thoai,
-            'tien_hang'         =>  $gio_hang->sum('thanh_tien'),
-            'phi_ship'          =>  $phi_ship,
-            'tong_tien'         =>  $gio_hang->sum('thanh_tien') + $phi_ship,
-            'is_thanh_toan'     =>  0,
-            'tinh_trang'        =>  0,
-        ]);
+            // Tạo mã đơn hàng unique bằng timestamp + random
+            $ma_don_hang_temp = 'DZ' . time() . rand(100, 999);
 
-        // Cập nhật giỏ hàng (id_don_hang = 0) thành đơn hàng thật
-        ChiTietDonHang::where('id_don_hang', 0)
-            ->where('id_khach_hang', Auth::guard('sanctum')->user()->id)
-            ->where('chi_tiet_don_hangs.id_quan_an', $id_quan_an)
-            ->update([
-                'id_don_hang' => $donHang->id,
+            $donHang = DonHang::create([
+                'ma_don_hang'       =>  $ma_don_hang_temp,
+                'id_khach_hang'     =>  $khachHang->id,
+                'id_voucher'        =>  0,
+                'id_shipper'        =>  0,
+                'id_quan_an'        =>  $id_quan_an,
+                'phuong_thuc_thanh_toan' =>  DonHang::thanh_toan_tien_mat,
+                'id_dia_chi_nhan'   =>  $id_dia_chi_khach,
+                'ten_nguoi_nhan'    =>  $dia_chi_khach->ten_nguoi_nhan,
+                'so_dien_thoai'     =>  $dia_chi_khach->so_dien_thoai,
+                'tien_hang'         =>  $gio_hang->sum('thanh_tien'),
+                'phi_ship'          =>  $phi_ship,
+                'tong_tien'         =>  $gio_hang->sum('thanh_tien') + $phi_ship,
+                'is_thanh_toan'     =>  0,
+                'tinh_trang'        =>  0,
             ]);
 
-        // Update lại mã đơn hàng theo ID thật
-        $donHang->ma_don_hang = 'DZ' . $donHang->id;
-        $donHang->save();
+            // Cập nhật giỏ hàng (id_don_hang = 0) thành đơn hàng thật
+            ChiTietDonHang::where('id_don_hang', 0)
+                ->where('id_khach_hang', $khachHang->id)
+                ->where('chi_tiet_don_hangs.id_quan_an', $id_quan_an)
+                ->update([
+                    'id_don_hang' => $donHang->id,
+                ]);
 
-        // Trigger Broadcasting Event: Thông báo đơn hàng mới đến Quán ăn và Shipper
-        event(new DonHangMoiEvent($donHang));
+            // Update lại mã đơn hàng theo ID thật
+            $donHang->ma_don_hang = 'DZ' . $donHang->id;
+            $donHang->save();
 
-        // Lấy lại danh sách món ăn trong đơn hàng để trả về cho modal
-        $chi_tiet_mon_an = ChiTietDonHang::where('id_don_hang', $donHang->id)
-            ->join('mon_ans', 'mon_ans.id', 'chi_tiet_don_hangs.id_mon_an')
-            ->select(
-                'chi_tiet_don_hangs.*',
-                'mon_ans.ten_mon_an',
-                'mon_ans.hinh_anh'
-            )
-            ->get();
+            // Trigger Broadcasting Event: Thông báo đơn hàng mới đến Quán ăn và Shipper
+            event(new DonHangMoiEvent($donHang));
 
-        return response()->json([
-            'status'            =>  true,
-            'message'           =>  'Đã xác nhận đơn hàng thành công!',
-            'id_don_hang'       =>  $donHang->id,
-            'ma_don_hang'       =>  $donHang->ma_don_hang,
-            'tien_hang'         =>  $donHang->tien_hang,
-            'phi_ship'          =>  $donHang->phi_ship,
-            'tong_tien'         =>  $donHang->tong_tien,
-            'chi_tiet_mon_an'   =>  $chi_tiet_mon_an,
-            'dia_chi_nhan'      => [
-                'ten_nguoi_nhan'    => $dia_chi_khach->ten_nguoi_nhan,
-                'so_dien_thoai'     => $dia_chi_khach->so_dien_thoai,
-                'dia_chi'           => $dia_chi_khach->dia_chi,
-            ]
-        ]);
+            // Lấy lại danh sách món ăn trong đơn hàng để trả về cho modal
+            $chi_tiet_mon_an = ChiTietDonHang::where('id_don_hang', $donHang->id)
+                ->join('mon_ans', 'mon_ans.id', 'chi_tiet_don_hangs.id_mon_an')
+                ->select(
+                    'chi_tiet_don_hangs.*',
+                    'mon_ans.ten_mon_an',
+                    'mon_ans.hinh_anh'
+                )
+                ->get();
+
+            return response()->json([
+                'status'            =>  true,
+                'message'           =>  'Đã xác nhận đơn hàng thành công!',
+                'id_don_hang'       =>  $donHang->id,
+                'ma_don_hang'       =>  $donHang->ma_don_hang,
+                'tien_hang'         =>  $donHang->tien_hang,
+                'phi_ship'          =>  $donHang->phi_ship,
+                'tong_tien'         =>  $donHang->tong_tien,
+                'chi_tiet_mon_an'   =>  $chi_tiet_mon_an,
+                'dia_chi_nhan'      => [
+                    'ten_nguoi_nhan'    => $dia_chi_khach->ten_nguoi_nhan,
+                    'so_dien_thoai'     => $dia_chi_khach->so_dien_thoai,
+                    'dia_chi'           => $dia_chi_khach->dia_chi,
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('xacNhanDatHangTienMat Error: ' . $e->getMessage(), [
+                'id_quan_an' => $id_quan_an,
+                'id_dia_chi_khach' => $id_dia_chi_khach,
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'status'    => false,
+                'message'   => 'Có lỗi xảy ra khi xác nhận đơn hàng: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }
 

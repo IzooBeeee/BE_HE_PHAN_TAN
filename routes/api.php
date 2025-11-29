@@ -254,8 +254,8 @@ Route::get('/khach-hang/quan-an/data', [ClientHomeController::class, 'getDataQua
 Route::get('/khach-hang/tim-kiem-goi-y', [ClientHomeController::class, 'timKiemGoiY']);
 // Khach-hang/don-dat-hang
 Route::get('/khach-hang/don-dat-hang/{id_quan_an}', [ChiTietDonHangController::class, 'getDonDatHang']);
-Route::get('/khach-hang/xac-nhan-dat-hang/{id_quan_an}/{id_dia_chi_khach}', [ChiTietDonHangController::class, 'xacNhanDatHangChuyenKhoan']);
-Route::get('/khach-hang/xac-nhan-dat-hang-tien-mat/{id_quan_an}/{id_dia_chi_khach}', [ChiTietDonHangController::class, 'xacNhanDatHangTienMat']);
+Route::get('/khach-hang/xac-nhan-dat-hang/{id_quan_an}/{id_dia_chi_khach}', [ChiTietDonHangController::class, 'xacNhanDatHangChuyenKhoan'])->middleware('khachHangMiddle');
+Route::get('/khach-hang/xac-nhan-dat-hang-tien-mat/{id_quan_an}/{id_dia_chi_khach}', [ChiTietDonHangController::class, 'xacNhanDatHangTienMat'])->middleware('khachHangMiddle');
 Route::post('/khach-hang/don-dat-hang/create', [ChiTietDonHangController::class, 'themGioHang']);
 Route::post('/khach-hang/don-dat-hang/update', [ChiTietDonHangController::class, 'updateGioHang']);
 Route::post('/khach-hang/don-dat-hang/delete', [ChiTietDonHangController::class, 'deleteGioHang']);
@@ -336,5 +336,3 @@ Route::post('/broadcasting/auth', function (Request $request) {
         ], 403);
     }
 })->middleware(['auth:sanctum']);
-
-
