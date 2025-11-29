@@ -22,14 +22,16 @@ use App\Models\PhanQuyen;
 use App\Models\Shipper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 
 class ShipperController extends Controller
 {
-    public function search(Request $request){
-        $noi_dung_tim = '%'. $request->noi_dung_tim . '%';
+    public function search(Request $request)
+    {
+        $noi_dung_tim = '%' . $request->noi_dung_tim . '%';
         $data   =  Shipper::where('ho_va_ten', 'like', $noi_dung_tim)
-                            ->get();
+            ->get();
         return response()->json([
             'data'  => $data
         ]);
@@ -416,21 +418,27 @@ class ShipperController extends Controller
                         'status'    => 0,
                         'message'   => 'Đơn hàng chưa được nhận!'
                     ]);
-            }
-            $donHang->tinh_trang    = 2;
-            $donHang->is_thanh_toan = 1;
-            $donHang->save();
-            $shipper = Shipper::find($user->id);
-            $shipper->tong_tien = $shipper->tong_tien + $donHang->phi_ship * 0.8;
-            $shipper->save();
+                }
+                $donHang->tinh_trang    = 2;
+                $donHang->is_thanh_toan = 1;
+                $donHang->save();
+                $shipper = Shipper::find($user->id);
+                $shipper->tong_tien = $shipper->tong_tien + $donHang->phi_ship * 0.8;
+                $shipper->save();
 
-            // Trigger Broadcasting Event: Thông báo shipper đã giao xong đơn
-            event(new DonHangHoanThanhEvent($donHang));
+                // Trigger Broadcasting Event: Thông báo shipper đã giao xong đơn
+                try {
+                    event(new DonHangHoanThanhEvent($donHang));
+                } catch (\Exception $e) {
+                    Log::warning('Broadcasting event failed: ' . $e->getMessage(), [
+                        'don_hang_id' => $donHang->id
+                    ]);
+                }
 
-            return response()->json([
-                'status'    => 1,
-                'message'   => 'Hoàn thành đơn hàng thành công!'
-            ]);
+                return response()->json([
+                    'status'    => 1,
+                    'message'   => 'Hoàn thành đơn hàng thành công!'
+                ]);
             } else {
                 return response()->json([
                     'status'    => 0,

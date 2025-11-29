@@ -365,7 +365,14 @@ class ChiTietDonHangController extends Controller
             $donHang->save();
 
             // Trigger Broadcasting Event: Thông báo đơn hàng mới đến Quán ăn và Shipper
-            event(new DonHangMoiEvent($donHang));
+            try {
+                event(new DonHangMoiEvent($donHang));
+            } catch (\Exception $e) {
+                // Nếu broadcasting fail (Pusher timeout), chỉ log warning, không fail request
+                Log::warning('Broadcasting event failed: ' . $e->getMessage(), [
+                    'don_hang_id' => $donHang->id
+                ]);
+            }
 
             // Lấy lại danh sách món ăn trong đơn hàng để trả về cho modal
             $chi_tiet_mon_an = ChiTietDonHang::where('id_don_hang', $donHang->id)
@@ -559,7 +566,14 @@ class ChiTietDonHangController extends Controller
             $donHang->save();
 
             // Trigger Broadcasting Event: Thông báo đơn hàng mới đến Quán ăn và Shipper
-            event(new DonHangMoiEvent($donHang));
+            try {
+                event(new DonHangMoiEvent($donHang));
+            } catch (\Exception $e) {
+                // Nếu broadcasting fail (Pusher timeout), chỉ log warning, không fail request
+                Log::warning('Broadcasting event failed: ' . $e->getMessage(), [
+                    'don_hang_id' => $donHang->id
+                ]);
+            }
 
             // Lấy lại danh sách món ăn trong đơn hàng để trả về cho modal
             $chi_tiet_mon_an = ChiTietDonHang::where('id_don_hang', $donHang->id)

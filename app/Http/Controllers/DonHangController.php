@@ -13,6 +13,7 @@ use Carbon\Carbon;
 use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 
 class DonHangController extends Controller
@@ -185,7 +186,13 @@ class DonHangController extends Controller
             ]);
 
             // Trigger Broadcasting Event: Thông báo quán ăn đã làm xong đơn
-            event(new DonHangDaXongEvent($donHang));
+            try {
+                event(new DonHangDaXongEvent($donHang));
+            } catch (\Exception $e) {
+                Log::warning('Broadcasting event failed: ' . $e->getMessage(), [
+                    'don_hang_id' => $donHang->id
+                ]);
+            }
         }
 
         return response()->json([
@@ -312,7 +319,13 @@ class DonHangController extends Controller
             ]);
 
             // Trigger Broadcasting Event: Thông báo shipper đã giao xong đơn
-            event(new DonHangHoanThanhEvent($donHang));
+            try {
+                event(new DonHangHoanThanhEvent($donHang));
+            } catch (\Exception $e) {
+                Log::warning('Broadcasting event failed: ' . $e->getMessage(), [
+                    'don_hang_id' => $donHang->id
+                ]);
+            }
         }
 
         return response()->json([
@@ -335,7 +348,13 @@ class DonHangController extends Controller
             ]);
 
             // Trigger Broadcasting Event: Thông báo shipper đã nhận đơn
-            event(new DonHangDaNhanEvent($check));
+            try {
+                event(new DonHangDaNhanEvent($check));
+            } catch (\Exception $e) {
+                Log::warning('Broadcasting event failed: ' . $e->getMessage(), [
+                    'don_hang_id' => $check->id
+                ]);
+            }
 
             return response()->json([
                 'status'    => 1,
