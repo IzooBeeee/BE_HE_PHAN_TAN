@@ -2102,12 +2102,21 @@ class ChiTietDonHangSeeder extends Seeder
         ]);
 
         // Hậu xử lý: tăng đơn giá/số lượng để tổng chi tiết cao hơn
-        DB::table('chi_tiet_don_hangs')->update([
-            'so_luong' => DB::raw('LEAST(so_luong + FLOOR(RAND()*3)+1, 10)'),
-            'don_gia' => DB::raw('CEIL(don_gia * 2.0 / 1000) * 1000'),
-        ]);
-        DB::table('chi_tiet_don_hangs')->update([
-            'thanh_tien' => DB::raw('so_luong * don_gia')
-        ]);
+        // Sử dụng PHP logic thay vì raw SQL để tương thích với cả MySQL và SQLite
+        $chiTietDonHangs = DB::table('chi_tiet_don_hangs')->get();
+
+        foreach ($chiTietDonHangs as $chiTiet) {
+            $newSoLuong = min($chiTiet->so_luong + floor(rand(0, 2)) + 1, 10);
+            $newDonGia = ceil($chiTiet->don_gia * 2.0 / 1000) * 1000;
+            $newThanhTien = $newSoLuong * $newDonGia;
+
+            DB::table('chi_tiet_don_hangs')
+                ->where('id', $chiTiet->id)
+                ->update([
+                    'so_luong' => $newSoLuong,
+                    'don_gia' => $newDonGia,
+                    'thanh_tien' => $newThanhTien,
+                ]);
+        }
     }
 }
