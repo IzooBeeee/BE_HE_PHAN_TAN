@@ -184,26 +184,37 @@ class DonHangController extends Controller
 
     public function getDonHangQuanAn()
     {
-        $user = Auth::guard('sanctum')->user();
+        try {
+            $user = Auth::guard('sanctum')->user();
 
-        $data = DonHang::where('don_hangs.id_quan_an', $user->id)
-            ->where('tinh_trang', '>=', 1)
-            ->join('khach_hangs', 'khach_hangs.id', 'don_hangs.id_khach_hang')
-            ->join('shippers', 'shippers.id', 'don_hangs.id_shipper')
-            ->select(
-                'don_hangs.id',
-                'don_hangs.created_at',
-                'don_hangs.ma_don_hang',
-                'don_hangs.tien_hang',
-                'don_hangs.tinh_trang',
-                'don_hangs.ten_nguoi_nhan',
-                'shippers.ho_va_ten as ho_va_ten_shipper',
-            )
-            ->orderBy('don_hangs.created_at', 'desc')
-            ->get();
-        return response()->json([
-            'data' => $data,
-        ]);
+            $data = DonHang::where('don_hangs.id_quan_an', $user->id)
+                ->where('tinh_trang', '>=', 0) // Lấy tất cả đơn hàng, kể cả mới tạo (0)
+                ->join('khach_hangs', 'khach_hangs.id', 'don_hangs.id_khach_hang')
+                ->leftJoin('shippers', 'shippers.id', 'don_hangs.id_shipper') // leftJoin để lấy cả đơn chưa có shipper
+                ->select(
+                    'don_hangs.id',
+                    'don_hangs.created_at',
+                    'don_hangs.ma_don_hang',
+                    'don_hangs.tien_hang',
+                    'don_hangs.tinh_trang',
+                    'don_hangs.ten_nguoi_nhan',
+                    'shippers.ho_va_ten as ho_va_ten_shipper',
+                )
+                ->orderBy('don_hangs.created_at', 'desc')
+                ->get();
+            return response()->json([
+                'data' => $data,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('getDonHangQuanAn Error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'status' => false,
+                'message' => 'Có lỗi xảy ra khi lấy danh sách đơn hàng: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     public function daXongDonHang(Request $request)
