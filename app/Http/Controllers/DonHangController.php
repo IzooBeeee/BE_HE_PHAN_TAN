@@ -20,131 +20,166 @@ class DonHangController extends Controller
 {
     public function getDonHangKhachHang()
     {
-        $user = Auth::guard('sanctum')->user();
+        try {
+            $user = Auth::guard('sanctum')->user();
 
-        $data = DonHang::where('don_hangs.id_khach_hang', $user->id)
-            ->join('quan_ans', 'quan_ans.id', 'don_hangs.id_quan_an')
-            ->leftJoin('shippers', 'shippers.id', 'don_hangs.id_shipper')
-            ->join('dia_chis', 'dia_chis.id', 'don_hangs.id_dia_chi_nhan')
-            ->leftJoin('chi_tiet_don_hangs', 'chi_tiet_don_hangs.id_don_hang', 'don_hangs.id')
-            ->leftJoin('mon_ans', 'mon_ans.id', 'chi_tiet_don_hangs.id_mon_an')
-            ->select(
-                'don_hangs.id',
-                'don_hangs.ma_don_hang',
-                'don_hangs.created_at',
-                'don_hangs.updated_at',
-                'don_hangs.tien_hang',
-                'don_hangs.phi_ship',
-                'don_hangs.tong_tien',
-                'don_hangs.is_thanh_toan',
-                'don_hangs.tinh_trang',
-                'quan_ans.ten_quan_an',
-                'quan_ans.hinh_anh as hinh_anh_quan',
-                'quan_ans.dia_chi as dia_chi_quan',
-                'shippers.ho_va_ten as ho_va_ten_shipper',
-                'shippers.so_dien_thoai as sdt_shipper',
-                'dia_chis.dia_chi',
-                'dia_chis.ten_nguoi_nhan',
-                'dia_chis.so_dien_thoai',
-                DB::raw('GROUP_CONCAT(DISTINCT mon_ans.hinh_anh ORDER BY mon_ans.id LIMIT 1) as hinh_anh_mon_an'),
-                DB::raw('COUNT(DISTINCT chi_tiet_don_hangs.id) as so_mon')
-            )
-            ->groupBy(
-                'don_hangs.id',
-                'don_hangs.ma_don_hang',
-                'don_hangs.created_at',
-                'don_hangs.updated_at',
-                'don_hangs.tien_hang',
-                'don_hangs.phi_ship',
-                'don_hangs.tong_tien',
-                'don_hangs.is_thanh_toan',
-                'don_hangs.tinh_trang',
-                'quan_ans.ten_quan_an',
-                'quan_ans.hinh_anh',
-                'quan_ans.dia_chi',
-                'shippers.ho_va_ten',
-                'shippers.so_dien_thoai',
-                'dia_chis.dia_chi',
-                'dia_chis.ten_nguoi_nhan',
-                'dia_chis.so_dien_thoai'
-            )
-            ->orderBy('don_hangs.created_at', 'desc')
-            ->get();
+            if (!$user) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
 
-        return response()->json([
-            'status' => true,
-            'data' => $data
-        ]);
+            $data = DonHang::where('don_hangs.id_khach_hang', $user->id)
+                ->join('quan_ans', 'quan_ans.id', 'don_hangs.id_quan_an')
+                ->leftJoin('shippers', 'shippers.id', 'don_hangs.id_shipper')
+                ->join('dia_chis', 'dia_chis.id', 'don_hangs.id_dia_chi_nhan')
+                ->leftJoin('chi_tiet_don_hangs', 'chi_tiet_don_hangs.id_don_hang', 'don_hangs.id')
+                ->leftJoin('mon_ans', 'mon_ans.id', 'chi_tiet_don_hangs.id_mon_an')
+                ->select(
+                    'don_hangs.id',
+                    'don_hangs.ma_don_hang',
+                    'don_hangs.created_at',
+                    'don_hangs.updated_at',
+                    'don_hangs.tien_hang',
+                    'don_hangs.phi_ship',
+                    'don_hangs.tong_tien',
+                    'don_hangs.is_thanh_toan',
+                    'don_hangs.tinh_trang',
+                    'don_hangs.phuong_thuc_thanh_toan',
+                    'quan_ans.ten_quan_an',
+                    'quan_ans.hinh_anh as hinh_anh_quan',
+                    'quan_ans.dia_chi as dia_chi_quan',
+                    'shippers.ho_va_ten as ho_va_ten_shipper',
+                    'shippers.so_dien_thoai as sdt_shipper',
+                    'dia_chis.dia_chi',
+                    'dia_chis.ten_nguoi_nhan',
+                    'dia_chis.so_dien_thoai',
+                    DB::raw('GROUP_CONCAT(DISTINCT mon_ans.hinh_anh ORDER BY mon_ans.id LIMIT 1) as hinh_anh_mon_an'),
+                    DB::raw('COUNT(DISTINCT chi_tiet_don_hangs.id) as so_mon')
+                )
+                ->groupBy(
+                    'don_hangs.id',
+                    'don_hangs.ma_don_hang',
+                    'don_hangs.created_at',
+                    'don_hangs.updated_at',
+                    'don_hangs.tien_hang',
+                    'don_hangs.phi_ship',
+                    'don_hangs.tong_tien',
+                    'don_hangs.is_thanh_toan',
+                    'don_hangs.tinh_trang',
+                    'don_hangs.phuong_thuc_thanh_toan',
+                    'quan_ans.id',
+                    'quan_ans.ten_quan_an',
+                    'quan_ans.hinh_anh',
+                    'quan_ans.dia_chi',
+                    'shippers.id',
+                    'shippers.ho_va_ten',
+                    'shippers.so_dien_thoai',
+                    'dia_chis.id',
+                    'dia_chis.dia_chi',
+                    'dia_chis.ten_nguoi_nhan',
+                    'dia_chis.so_dien_thoai'
+                )
+                ->orderBy('don_hangs.created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'status' => true,
+                'data' => $data
+            ]);
+        } catch (\Exception $e) {
+            Log::error('getDonHangKhachHang Error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'status' => false,
+                'message' => 'Có lỗi xảy ra khi lấy danh sách đơn hàng: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     public function getChiTietDonHangKhachHang(Request $request)
     {
-        $user = Auth::guard('sanctum')->user();
+        try {
+            $user = Auth::guard('sanctum')->user();
 
-        // Validate request
-        if (!$request->id) {
+            // Validate request
+            if (!$request->id) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Vui lòng cung cấp ID đơn hàng'
+                ], 400);
+            }
+
+            // Lấy thông tin tổng quát đơn hàng
+            $donHang = DonHang::where('don_hangs.id', $request->id)
+                ->where('don_hangs.id_khach_hang', $user->id) // Đảm bảo đơn hàng thuộc về khách hàng này
+                ->leftJoin('quan_ans', 'quan_ans.id', 'don_hangs.id_quan_an')
+                ->leftJoin('shippers', 'shippers.id', 'don_hangs.id_shipper')
+                ->leftJoin('dia_chis', 'dia_chis.id', 'don_hangs.id_dia_chi_nhan')
+                ->leftJoin('vouchers', 'vouchers.id', 'don_hangs.id_voucher')
+                ->select(
+                    'don_hangs.*',
+                    'quan_ans.ten_quan_an',
+                    'quan_ans.hinh_anh as hinh_anh_quan',
+                    'quan_ans.dia_chi as dia_chi_quan',
+                    'quan_ans.so_dien_thoai as sdt_quan',
+                    'shippers.ho_va_ten as ho_va_ten_shipper',
+                    'shippers.so_dien_thoai as sdt_shipper',
+                    'shippers.hinh_anh as hinh_anh_shipper',
+                    'dia_chis.dia_chi',
+                    'dia_chis.ten_nguoi_nhan',
+                    'dia_chis.so_dien_thoai as sdt_nguoi_nhan',
+                    'vouchers.ma_code',
+                    'vouchers.ten_voucher',
+                    'vouchers.loai_giam',
+                    'vouchers.so_giam_gia',
+                    'vouchers.so_tien_toi_da'
+                )
+                ->first();
+
+            if (!$donHang) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Không tìm thấy đơn hàng'
+                ], 404);
+            }
+
+            // Lấy thông tin chi tiết các món ăn
+            $chiTietMonAn = ChiTietDonHang::where('chi_tiet_don_hangs.id_don_hang', $request->id)
+                ->join('mon_ans', 'mon_ans.id', 'chi_tiet_don_hangs.id_mon_an')
+                ->select(
+                    'chi_tiet_don_hangs.id',
+                    'mon_ans.id as id_mon_an',
+                    'mon_ans.ten_mon_an',
+                    'mon_ans.hinh_anh',
+                    'chi_tiet_don_hangs.so_luong',
+                    'chi_tiet_don_hangs.don_gia',
+                    'chi_tiet_don_hangs.thanh_tien',
+                    'chi_tiet_don_hangs.ghi_chu'
+                )
+                ->orderBy('chi_tiet_don_hangs.id', 'asc')
+                ->get();
+
+            return response()->json([
+                'status' => true,
+                'don_hang' => $donHang,
+                'chi_tiet_mon_an' => $chiTietMonAn,
+                'tong_so_mon' => $chiTietMonAn->count()
+            ]);
+        } catch (\Exception $e) {
+            Log::error('getChiTietDonHangKhachHang Error: ' . $e->getMessage(), [
+                'don_hang_id' => $request->id ?? null,
+                'trace' => $e->getTraceAsString()
+            ]);
+
             return response()->json([
                 'status' => false,
-                'message' => 'Vui lòng cung cấp ID đơn hàng'
-            ], 400);
+                'message' => 'Có lỗi xảy ra khi lấy chi tiết đơn hàng: ' . $e->getMessage()
+            ], 500);
         }
-
-        // Lấy thông tin tổng quát đơn hàng
-        $donHang = DonHang::where('don_hangs.id', $request->id)
-            ->where('don_hangs.id_khach_hang', $user->id) // Đảm bảo đơn hàng thuộc về khách hàng này
-            ->leftJoin('quan_ans', 'quan_ans.id', 'don_hangs.id_quan_an')
-            ->leftJoin('shippers', 'shippers.id', 'don_hangs.id_shipper')
-            ->leftJoin('dia_chis', 'dia_chis.id', 'don_hangs.id_dia_chi_nhan')
-            ->leftJoin('vouchers', 'vouchers.id', 'don_hangs.id_voucher')
-            ->select(
-                'don_hangs.*',
-                'quan_ans.ten_quan_an',
-                'quan_ans.hinh_anh as hinh_anh_quan',
-                'quan_ans.dia_chi as dia_chi_quan',
-                'quan_ans.so_dien_thoai as sdt_quan',
-                'shippers.ho_va_ten as ho_va_ten_shipper',
-                'shippers.so_dien_thoai as sdt_shipper',
-                'shippers.hinh_anh as hinh_anh_shipper',
-                'dia_chis.dia_chi',
-                'dia_chis.ten_nguoi_nhan',
-                'dia_chis.so_dien_thoai as sdt_nguoi_nhan',
-                'vouchers.ma_code',
-                'vouchers.ten_voucher',
-                'vouchers.loai_giam',
-                'vouchers.so_giam_gia',
-                'vouchers.so_tien_toi_da'
-            )
-            ->first();
-
-        if (!$donHang) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Không tìm thấy đơn hàng'
-            ], 404);
-        }
-
-        // Lấy thông tin chi tiết các món ăn
-        $chiTietMonAn = ChiTietDonHang::where('chi_tiet_don_hangs.id_don_hang', $request->id)
-            ->join('mon_ans', 'mon_ans.id', 'chi_tiet_don_hangs.id_mon_an')
-            ->select(
-                'chi_tiet_don_hangs.id',
-                'mon_ans.id as id_mon_an',
-                'mon_ans.ten_mon_an',
-                'mon_ans.hinh_anh',
-                'chi_tiet_don_hangs.so_luong',
-                'chi_tiet_don_hangs.don_gia',
-                'chi_tiet_don_hangs.thanh_tien',
-                'chi_tiet_don_hangs.ghi_chu'
-            )
-            ->orderBy('chi_tiet_don_hangs.id', 'asc')
-            ->get();
-
-        return response()->json([
-            'status' => true,
-            'don_hang' => $donHang,
-            'chi_tiet_mon_an' => $chiTietMonAn,
-            'tong_so_mon' => $chiTietMonAn->count()
-        ]);
     }
 
     public function getDonHangQuanAn()
